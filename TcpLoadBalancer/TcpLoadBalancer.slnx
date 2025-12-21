@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="TcpLoadBalancer.Tests/TcpLoadBalancer.Tests.csproj" />
+  <Project Path="TcpLoadBalancer/TcpLoadBalancer.csproj" />
+</Solution>
