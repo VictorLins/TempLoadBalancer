@@ -7,12 +7,12 @@ A high-performance, asynchronous **Layer 4 TCP Load Balancer** built with .NET 8
 
 ## 📖 Table of Contents
 * [✨ Features](#features)
-* [🏗️ Project Architecture](#project-architecture--structure)
-* [⚡ Reactive Configuration](#reactive-configuration--high-availability)
+* [🏗️ Project Architecture](#architecture)
+* [⚡ Reactive Configuration](#reactive)
 * [🚀 Getting Started](#getting-started)
-* [⚙️ Configuration](#️-configuration)
-* [📊 Observability](#observability--monitoring)
-* [🧪 Testing & Simulation](#testing--simulation)
+* [⚙️ Configuration](#config)
+* [📊 Observability](#observability)
+* [🧪 Testing & Simulation](#testing)
 * [💻 Usage](#usage)
 
 ---
