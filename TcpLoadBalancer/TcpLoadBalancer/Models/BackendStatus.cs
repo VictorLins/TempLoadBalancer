@@ -8,6 +8,6 @@
         public int ActiveConnections => _activeConnections;
 
         public void IncrementActiveConnections() => Interlocked.Increment(ref _activeConnections);
-        public void DecrementActiveConnections() => Interlocked.Increment(ref _activeConnections);
+        public void DecrementActiveConnections() => Interlocked.Decrement(ref _activeConnections);
     }
 }

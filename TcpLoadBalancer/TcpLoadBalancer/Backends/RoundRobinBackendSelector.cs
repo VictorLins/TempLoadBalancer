@@ -8,7 +8,7 @@ using TcpLoadBalancer.Models;
 
 namespace TcpLoadBalancer.Backends
 {
-    internal class RoundRobinBackendSelector : IBackendSelector
+    public class RoundRobinBackendSelector : IBackendSelector
     {
         private readonly List<BackendStatus> _backends;
         private int _index = -1;

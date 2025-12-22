@@ -17,41 +17,46 @@ namespace TcpLoadBalancer.Networking
             _cancellationToken = prCancellationToken;
         }
 
+        protected virtual TcpClient CreateBackendTcpClient() => new TcpClient();
+
         public async Task HandleAsync()
         {
+            bool lIncremented = false;
             try
             {
-                using TcpClient lBackendClient = new TcpClient();
+                using TcpClient lBackendClient = CreateBackendTcpClient();
                 await lBackendClient.ConnectAsync(_backend.Endpoint.Host, _backend.Endpoint.Port, _cancellationToken);
                 Log.Information($"Connected to backend {_backend.Endpoint.Host}:{_backend.Endpoint.Port}");
 
                 _backend.IncrementActiveConnections();
+                lIncremented = true;
 
                 using NetworkStream lClientStream = _client.GetStream();
                 using NetworkStream lBackendStream = lBackendClient.GetStream();
 
-                using CancellationTokenSource lCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(_cancellationToken);
+                using CancellationTokenSource lLinkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(_cancellationToken);
 
                 Task lForwardClientToBackend = Task.Run(async () =>
                 {
                     try
                     {
-                        await lClientStream.CopyToAsync(lBackendStream, lCancellationTokenSource.Token);
+                        await lClientStream.CopyToAsync(lBackendStream, lLinkedCancellationTokenSource.Token);
                     }
                     catch { /* Do Nothing */}
-                }, lCancellationTokenSource.Token);
+                }, lLinkedCancellationTokenSource.Token);
+
 
                 Task lForwardBackendToClient = Task.Run(async () =>
                 {
                     try
                     {
-                        await lBackendStream.CopyToAsync(lClientStream, lCancellationTokenSource.Token);
+                        await lBackendStream.CopyToAsync(lClientStream, lLinkedCancellationTokenSource.Token);
                     }
                     catch { /* Do Nothing */}
-                }, lCancellationTokenSource.Token);
+                }, lLinkedCancellationTokenSource.Token);
 
                 await Task.WhenAny(lForwardClientToBackend, lForwardBackendToClient);
-                lCancellationTokenSource.Cancel();
+                lLinkedCancellationTokenSource.Cancel();
                 await Task.WhenAll(lForwardClientToBackend, lForwardBackendToClient);
             }
             catch (OperationCanceledException)
@@ -65,7 +70,8 @@ namespace TcpLoadBalancer.Networking
             finally
             {
                 _client.Close();
-                _backend.DecrementActiveConnections();
+                if (lIncremented)
+                    _backend.DecrementActiveConnections();
                 Log.Information($"Connection closed for backend {_backend.Endpoint.Host}:{_backend.Endpoint.Port}");
             }
         }

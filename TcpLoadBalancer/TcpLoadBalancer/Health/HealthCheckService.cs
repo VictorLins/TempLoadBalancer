@@ -45,7 +45,7 @@ namespace TcpLoadBalancer.Health
             Log.Information("HealthCheckService stopped.");
         }
 
-        private async Task<bool> CheckBackendAsync(BackendStatus prBackendStatus)
+        protected virtual async Task<bool> CheckBackendAsync(BackendStatus prBackendStatus)
         {
             try
             {

@@ -41,11 +41,11 @@ namespace TcpLoadBalancer
             var lListenEndoints = new IPEndPoint(IPAddress.Parse(lListenEndpointsParts[0]), int.Parse(lListenEndpointsParts[1]));
 
             var lBackends = lLoadBalancerConfig.GetSection("Backends").Get<List<BackendEndpoint>>()!
-                .Select(b => new BackendStatus { Endpoint = b })
-                .ToList();
+                .Select(b => new BackendStatus { Endpoint = b }).ToList();
 
-            // 5. Create backend selector (round-robin)
-            IBackendSelector lBackendSelector = new RoundRobinBackendSelector(lBackends);
+            // 5. Create backend selector (load balancer strategy)
+            String lLoadBalancerStrategy = lLoadBalancerConfig["Strategy"] ?? "RoundRobin";
+            IBackendSelector lBackendSelector = BackendSelectorFactory.CreateBackendSelector(lLoadBalancerStrategy, lBackends);
 
             // 6. Initialize services
             var lListenerService = new TcpListenerService(lBackendSelector, lListenEndoints, lCancellationTokenSource.Token);
@@ -65,8 +65,6 @@ namespace TcpLoadBalancer
             await Task.WhenAll(lTasks);
             Log.Information("TcpLoadBalancer stopped.");
             Log.CloseAndFlush();
-
-            Console.WriteLine("Hello, World!");
         }
     }
 }
