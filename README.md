@@ -5,36 +5,71 @@
 
 A high-performance, asynchronous **Layer 4 TCP Load Balancer** built with .NET 8. This solution efficiently distributes network traffic across multiple backend servers to ensure high availability and resource optimization.
 
+## 📖 Table of Contents
+* [✨ Features](#-features)
+* [🏗️ Project Architecture](#️-project-architecture)
+* [⚡ Reactive Configuration](#-reactive-configuration)
+* [🚀 Getting Started](#-getting-started)
+* [⚙️ Configuration](#️-configuration)
+* [📊 Observability](#-observability)
+* [🧪 Testing & Simulation](#-testing--simulation)
+* [🛠️ Usage](#️-usage)
+
+---
 
 ## ✨ Features
 
 * **⚖️ Layer 4 Balancing**: Efficiently routes raw TCP traffic based on IP and port.
 * **🔄 Multiple Strategies**: Supports **Round Robin**, **Least Connections**, and **Random** distribution algorithms.
-* **🏥 Health Monitoring**: Proactively checks backend status and automatically removes unresponsive servers from the pool.
-* **⚡ High Performance**: Fully asynchronous architecture using `System.Net.Sockets` for low-latency proxying.
+* **🏥 Health Monitoring**: Proactively checks backend status and automatically removes unresponsive servers.
+* **⚡ High Performance**: Fully asynchronous architecture using `System.Net.Sockets`.
 * **📊 Live Status**: Exports real-time health and connection statistics to a JSON file.
-* **🛡️ Resilient**: Gracefully handles connection drops, backend failures, and timeouts.
 * **🧪 Fully Tested**: Includes a comprehensive XUnit test suite for core logic and edge cases.
 
-## 🏗️ Project Architecture & Structure
+---
 
-To understand how the load balancer operates, here is a high-level overview of the request flow and the system components:
+## 🏗️ Project Architecture & Structure
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/27e59b1d-9419-4a36-b933-a8f97c55ac8f" alt="TcpLoadBalancer Architecture" width="850">
 </p>
 
-### 🔄 How it Works
-1.  **Initialization**: The system loads its configuration from `appsettings.json`, defining the `ListenEndpoint` and the list of available `Backends`.
-2.  **Traffic Handling**: When a **Client** connects, the **Manager** evaluates the active connection counts and the selected **Strategy** (Round Robin, Least Connections, etc.) to choose the best available server.
-3.  **Active Proxying**: Once a backend is selected, the engine establishes a bi-directional asynchronous stream, tunneling raw TCP traffic between the client and the server.
-4.  **Health Monitoring**: In the background, the **Health Monitor** pings each backend at a set interval. If a server goes down, it is flagged as "Unhealthy" and temporarily removed from the rotation until it passes a check again.
-5.  **Observability**: All real-time data, including current connection counts and health status, is periodically exported to `status.json`.
+<details>
+<summary><b>🔍 How it Works (Technical Deep Dive)</b></summary>
+
+1. **Initialization**: The system loads its configuration from `appsettings.json`, defining the `ListenEndpoint` and the list of available `Backends`.
+2. **Traffic Handling**: When a **Client** connects, the **Manager** evaluates the active connection counts and the selected **Strategy** to choose the best available server.
+3. **Active Proxying**: Once a backend is selected, the engine establishes a bi-directional asynchronous stream, tunneling raw TCP traffic between the client and the server.
+4. **Health Monitoring**: In the background, the **Health Monitor** pings each backend at a set interval. If a server goes down, it is flagged as "Unhealthy" and temporarily removed from the rotation.
+5. **Observability**: All real-time data is periodically exported to `status.json`.
 
 ### 📂 Solution Projects
-The codebase is split into two focused areas:
-* **`TcpLoadBalancer`**: The heart of the application. It handles the low-level `System.Net.Sockets` logic, the thread-safe state management of backends, and the implementation of the balancing algorithms.
-* **`TcpLoadBalancer.Tests`**: A robust test suite using **XUnit**. It includes unit tests for the strategy logic and integration tests that simulate backend failures to verify the auto-failover capabilities.
+* **`TcpLoadBalancer`**: The heart of the application. Handles `System.Net.Sockets` logic and thread-safe state management.
+* **`TcpLoadBalancer.Tests`**: A robust test suite using **XUnit** for strategy logic and failover simulations.
+</details>
+
+---
+
+## ⚡ Reactive Configuration & High Availability
+
+This load balancer leverages the **.NET Options Pattern** with `IOptionsMonitor<T>` to provide **Reactive Configuration Management**.
+
+<details>
+<summary><b>🟢 Dynamic Adjustments (Zero Downtime)</b></summary>
+
+Changes in `appsettings.json` are detected via file-system watchers and injected into the running pipeline:
+* **Elastic Backend Scaling**: You can scale the backend pool horizontally by adding or removing endpoints live.
+* **Health Check Tuning**: Adjust `HealthCheckIntervalSeconds` on-the-fly to tune detection speed.
+* **Idle Timeout Management**: Update `DefaultIdleTimeSeconds` at any time to optimize resource reclamation.
+</details>
+
+<details>
+<summary><b>🔴 Architectural Constraints (Static Parameters)</b></summary>
+
+To maintain system state integrity, certain parameters require a graceful restart:
+* **Listen Endpoint**: Requires a **socket rebinding** operation at the OS level.
+* **Balancing Strategy**: Locked upon initialization to prevent **"routing drift"** and ensure consistent session logic.
+</details>
 
 ---
 
@@ -44,50 +79,94 @@ The codebase is split into two focused areas:
 * [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
 
 ### Installation
-1.  **Clone the repository**
-    ```bash
-    git clone [https://github.com/yourusername/TcpLoadBalancer.git](https://github.com/yourusername/TcpLoadBalancer.git)
-    cd TcpLoadBalancer
-    ```
-2.  **Restore and Build**
-    ```bash
-    dotnet restore
-    dotnet build
-    ```
-
+```bash
+git clone [https://github.com/yourusername/TcpLoadBalancer.git](https://github.com/yourusername/TcpLoadBalancer.git)
+cd TcpLoadBalancer
+dotnet restore
+dotnet build
+```
 ---
 
 ## ⚙️ Configuration
 
-Configure the application via the `LoadBalancer` section in `appsettings.json`.
+| Setting | Type | Reactive? | Description |
+| :--- | :--- | :--- | :--- |
+| **`Strategy`** | String | ❌ No | Algorithm: `RoundRobin`, `Random`, or `LeastConnections`. |
+| **`ListenEndpoint`** | String | ❌ No | The IP/Port the load balancer listens on. |
+| **`StatusFilePath`** | String | ❌ No | Path where the live status JSON is exported. |
+| **`Backends`** | Array | ✅ Yes | List of backend objects (`Host` and `Port`). |
+| **`HealthCheckIntervalSeconds`** | Int | ✅ Yes | Frequency of backend health verification. |
+| **`DefaultIdleTimeoutSeconds`** | Int | ✅ Yes | Inactivity timeout before closing a connection. |
 
-| Setting | Description | Example |
-| :--- | :--- | :--- |
-| **`Strategy`** | The algorithm used (`RoundRobin`, `Random`, or `LeastConnections`) | `Random` |
-| **`ListenEndpoint`** | The IP and Port the load balancer listens on | `0.0.0.0:9000` |
-| **`Backends`** | Array of backend objects (`Host` and `Port`) | See below |
-| **`HealthCheckIntervalSeconds`** | Frequency of backend health verification | `10` |
-| **`StatusFilePath`** | Path where the live status JSON is exported | `status/status.json` |
+<details>
+<summary><b>📄 View Example appsettings.json</b></summary>
 
-### Example `appsettings.json`
 ```json
 {
-  "LoadBalancer": {
-    "Strategy": "Random",
-    "ListenEndpoint": "0.0.0.0:9000",
-    "Backends": [
-      { "Host": "127.0.0.1", "Port": 9101 },
-      { "Host": "127.0.0.1", "Port": 9102 }
-    ],
-    "HealthCheckIntervalSeconds": 10,
-    "StatusFilePath": "status/loadbalancer-status.json"
-  }
+    "LoadBalancer": {
+        "Strategy": "RoundRobin",
+        "ListenEndpoint": "0.0.0.0:9000",
+        "Backends": [
+            { "Host": "127.0.0.1", "Port": 9101 },
+            { "Host": "127.0.0.1", "Port": 9102 }
+        ],
+        "HealthCheckIntervalSeconds": 10,
+        "DefaultIdleTimeoutSeconds": 600,
+        "StatusFilePath": "status/loadbalancer-status.json"
+    },
+    "Serilog": {
+        "MinimumLevel": "Debug",
+        "WriteTo": [
+            { "Name": "Console" },
+            {
+                "Name": "File",
+                "Args": {
+                    "path": "logs/loadbalancer-.log",
+                    "rollingInterval": "Day"
+                }
+            }
+        ]
+    }
 }
 ```
+</details>
+---
+
+## 📊 Observability & Monitoring
+
+The system maintains a real-time registry of backend states to ensure high availability and transparent traffic management.
+
+<details>
+<summary><b>👁️ View Sample Status Output (status.json)</b></summary>
+
+The load balancer periodically updates this JSON file with the current health and traffic metrics for each backend.
+
+```json
+{
+  "timestampUtc": "2025-12-22T23:16:19.0327807Z",
+  "activeConnections": 16,
+  "backends": [
+    {
+      "endpoint": "127.0.0.1:9101",
+      "healthy": true,
+      "activeConnections": 8
+    },
+    {
+      "endpoint": "127.0.0.1:9102",
+      "healthy": true,
+      "activeConnections": 8
+    }
+  ]
+}
+```
+</details>
 
 ## 🧪 Testing & Simulation
 
-To verify the load balancer in a local environment, you can use **Nmap (ncat)** to simulate backend servers and client traffic.
+To verify the load balancer locally, you can use **Nmap (ncat)** to simulate backend servers and client traffic. This allows you to observe real-time routing and failover behavior.
+
+<details>
+<summary><b>🛠️ Step-by-Step Simulation Guide</b></summary>
 
 ### 1. Start Mock Backend Servers
 Open two separate terminals and run the following commands to start listeners on different ports. These will act as your backend destinations:
@@ -110,8 +189,9 @@ Open a third terminal to simulate a client connecting to the Load Balancer (list
 ```bash
 ncat 127.0.0.1 9090
 ```
+</details>
 
-## 🛠️ Usage
+## 💻 Usage
 
 ### Running the Load Balancer
 To launch the application and start balancing traffic:
