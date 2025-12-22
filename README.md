@@ -6,14 +6,15 @@
 A high-performance, asynchronous **Layer 4 TCP Load Balancer** built with .NET 8. This solution efficiently distributes network traffic across multiple backend servers to ensure high availability and resource optimization.
 
 ## 📖 Table of Contents
-* [✨ Features](#features)
-* [🏗️ Project Architecture](#architecture)
-* [⚡ Reactive Configuration](#reactive)
-* [🚀 Getting Started](#getting-started)
-* [⚙️ Configuration](#config)
-* [📊 Observability](#observability)
-* [🧪 Testing & Simulation](#testing)
-* [💻 Usage](#usage)
+* [Features](#features)
+* [Project Architecture](#project-architecture--structure)
+* [Reactive Configuration](#reactive-configuration--high-availability)
+* [Getting Started](#getting-started)
+* [Configuration](#configuration)
+* [Observability](#observability--monitoring)
+* [Testing & Simulation](#testing--simulation)
+* [Usage](#usage)
+* [License](#license)
 
 ---
 
