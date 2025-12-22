@@ -1,108 +1,31 @@
-# TCP Load Balancer (L4) – .NET Study Case
+# 🌐 TcpLoadBalancer
 
-## Overview
+A high-performance, asynchronous Layer 4 Load Balancer built with **.NET 8**. This solution efficiently distributes TCP traffic across multiple backend servers, ensuring high availability and fault tolerance for your network services. 🚀
 
-This repository contains a lightweight **TCP Layer-4 Load Balancer** implemented in **C# and .NET**.
+## ✨ Features
 
-The project is intentionally scoped as a **technical study case**, demonstrating how scalability challenges were historically addressed before modern cloud-native tooling (managed load balancers, containers, service meshes).
+* **⚖️ Layer 4 Load Balancing**: Efficiently routes raw TCP traffic based on IP and port.
+* **🔄 Distribution Algorithms**: Supports **Round Robin** and **Least Connections** to optimize resource usage.
+* **🏥 Health Monitoring**: Periodically checks backend status and automatically removes unresponsive servers from the pool.
+* **⏱️ Configurable Timeouts**: Custom settings for connection establishment and idle sessions.
+* **🛡️ Robust Error Handling**: Gracefully manages connection drops and backend failures.
+* **🧪 Fully Tested**: Includes a comprehensive XUnit test suite covering core logic and edge cases.
 
-The goal is **not** to build a production-grade load balancer, but to demonstrate sound engineering decisions, TCP fundamentals, and clean architecture suitable for a senior-level take-home exercise.
+## 🏗️ Project Structure
 
----
+The solution is divided into two main projects:
 
-## Why This Project Exists
+* **`TcpLoadBalancer`**: The core engine containing the socket handling, balancing logic, and server management.
+* **`TcpLoadBalancer.Tests`**: Detailed unit and integration tests to ensure system reliability.
 
-In the late 1990s and early 2000s, scalability was often achieved by:
+## 🚀 Getting Started
 
-- Accepting incoming TCP connections
-- Routing traffic to backend servers
-- Tracking health and connection counts
-- Forwarding raw TCP streams efficiently
+### Prerequisites
+* [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or newer.
 
-This project recreates that approach using modern .NET while staying faithful to the constraints and mindset of that era.
+### Installation
 
----
-
-## Key Characteristics
-
-- Layer-4 (TCP) load balancing
-- Round-robin backend selection
-- Health-aware routing
-- Active connection tracking per backend
-- Correct handling of half-closed TCP connections
-- Graceful shutdown via cancellation tokens
-- Structured logging with Serilog
-- Optional status file for lightweight observability
-
----
-
-## Solution Structure
-
-TcpLoadBalancerSolution
-├── TcpLoadBalancer
-│ ├── Configuration
-│ │ └── LoadBalancerOptions.cs
-│ ├── Models
-│ │ └── BackendStatus.cs
-│ ├── Networking
-│ │ ├── TcpListenerService.cs
-│ │ └── ConnectionHandler.cs
-│ ├── Services
-│ │ ├── BackendSelector.cs
-│ │ └── StatusWriter.cs
-│ ├── appsettings.json
-│ └── Program.cs
-│
-└── TcpLoadBalancer.Tests
-└── BackendSelectorTests.cs
-
-
----
-
-## Project Types
-
-### TcpLoadBalancer
-
-- **Type:** .NET Console Application
-- **Purpose:** Acts as a TCP proxy and load balancer.
-
-**Responsibilities:**
-- Listen for incoming TCP connections
-- Select a healthy backend endpoint
-- Forward traffic bidirectionally
-- Track active connections
-- Handle graceful shutdown
-
----
-
-### TcpLoadBalancer.Tests
-
-- **Type:** xUnit Test Project
-- **Purpose:** Validate deterministic logic.
-
-**What is tested:**
-- Backend selection logic
-- Round-robin behaviour
-- State transitions
-
-Low-level TCP and OS socket behaviour are intentionally excluded.
-
----
-
-## Configuration
-
-All runtime configuration is externalised via `appsettings.json`.
-
-### Example
-
-```json
-{
-  "LoadBalancer": {
-    "ListenEndpoint": "127.0.0.1:9000",
-    "Backends": [
-      "127.0.0.1:9101",
-      "127.0.0.1:9102"
-    ],
-    "StatusFilePath": "status.json"
-  }
-}
+1. **Clone the repository**
+   ```bash
+   git clone [https://github.com/yourusername/TcpLoadBalancer.git](https://github.com/yourusername/TcpLoadBalancer.git)
+   cd TcpLoadBalancer
