@@ -1,21 +1,16 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using System.Text;
-using System.Threading.Tasks;
-using TcpLoadBalancer.Models;
+﻿using TcpLoadBalancer.Models;
 
 namespace TcpLoadBalancer.Backends
 {
     public class RoundRobinBackendSelector : IBackendSelector
     {
-        private readonly List<BackendStatus> _backends;
+        private List<BackendStatus> _backends;
         private int _index = -1;
+        private readonly object _lock = new object();
 
-        public RoundRobinBackendSelector(List<BackendStatus> backends)
+        public RoundRobinBackendSelector(List<BackendStatus> prBackends)
         {
-            _backends = backends;
+            _backends = prBackends;
         }
 
         public BackendStatus GetNextBackend()
@@ -25,11 +20,21 @@ namespace TcpLoadBalancer.Backends
                 int lNextIndex = Interlocked.Increment(ref _index) % _backends.Count;
                 BackendStatus lBackendStatus = _backends[lNextIndex];
 
-                if (lBackendStatus.IsHealthy)
+                if (lBackendStatus.IsHealthy && lBackendStatus.IsEnable)
                     return lBackendStatus;
             }
 
             throw new InvalidOperationException("No healthy backends available.");
+        }
+
+        public void UpdateBackends(List<BackendStatus> prNewBackends)
+        {
+            lock (_lock)
+            {
+                _backends = prNewBackends;
+                if (_index >= _backends.Count)
+                    _index = -1;
+            }
         }
     }
 }

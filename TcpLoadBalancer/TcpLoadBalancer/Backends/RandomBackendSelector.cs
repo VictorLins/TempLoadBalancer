@@ -4,23 +4,32 @@ namespace TcpLoadBalancer.Backends
 {
     public class RandomBackendSelector : IBackendSelector
     {
-        private readonly List<BackendStatus> _backends;
-        private Random _Random = new Random();
+        private List<BackendStatus> _backends;
+        private Random _random = new Random();
+        private readonly object _lock = new object();
 
-        public RandomBackendSelector(List<BackendStatus> backends)
+        public RandomBackendSelector(List<BackendStatus> prBackends)
         {
-            _backends = backends;
+            _backends = prBackends;
         }
 
         public BackendStatus GetNextBackend()
         {
-            List<BackendStatus> lHealhtyBackends = _backends.Where(b => b.IsHealthy).ToList();
+            List<BackendStatus> lHealthyBackends = _backends.Where(b => b.IsHealthy && b.IsEnable).ToList();
 
-            if (!lHealhtyBackends.Any())
+            if (!lHealthyBackends.Any())
                 throw new InvalidOperationException("No healthy backends available.");
 
-            int index = _Random.Next(lHealhtyBackends.Count);
-            return lHealhtyBackends[index];
+            int lIndex = _random.Next(lHealthyBackends.Count);
+            return lHealthyBackends[lIndex];
+        }
+
+        public void UpdateBackends(List<BackendStatus> prNewBackends)
+        {
+            lock (_lock)
+            {
+                _backends = prNewBackends;
+            }
         }
     }
 }

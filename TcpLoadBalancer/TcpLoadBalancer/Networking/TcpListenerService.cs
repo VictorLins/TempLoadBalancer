@@ -1,4 +1,5 @@
-﻿using Serilog;
+﻿using Microsoft.Extensions.Options;
+using Serilog;
 using System.Net;
 using System.Net.Sockets;
 using TcpLoadBalancer.Backends;
@@ -8,15 +9,22 @@ namespace TcpLoadBalancer.Networking
 {
     public class TcpListenerService
     {
-        private readonly IBackendSelector _backendSelector;
+        private readonly Func<IBackendSelector> _backendSelectorAccessor;
         private readonly IPEndPoint _listenEndpoint;
         private readonly CancellationToken _cancellationToken;
+        private readonly IOptionsMonitor<LoadBalancerOptions> _loadBalancerOptions;
+        private IBackendSelector _backendSelector => _backendSelectorAccessor();
 
-        public TcpListenerService(IBackendSelector prBackendSelector, IPEndPoint ptListenEndpoint, CancellationToken prCancellationToken)
+        public TcpListenerService(
+            Func<IBackendSelector> prBackendSelectorAccessor,
+            IPEndPoint prListenEndpoint,
+            CancellationToken prCancellationToken,
+            IOptionsMonitor<LoadBalancerOptions> prLoadBalancerOptions)
         {
-            _backendSelector = prBackendSelector;
-            _listenEndpoint = ptListenEndpoint;
+            _backendSelectorAccessor = prBackendSelectorAccessor;
+            _listenEndpoint = prListenEndpoint;
             _cancellationToken = prCancellationToken;
+            _loadBalancerOptions = prLoadBalancerOptions;
         }
 
         public async Task StartAsync()
@@ -29,11 +37,9 @@ namespace TcpLoadBalancer.Networking
             {
                 while (!_cancellationToken.IsCancellationRequested)
                 {
-                    // Accept incoming client
-                    TcpClient lTcpClient = await lTcpListener.AcceptTcpClientAsync(_cancellationToken);
-                    Log.Information($"Accepted connection from {lTcpClient.Client.RemoteEndPoint}");
+                    TcpClient lExternalTcpClient = await lTcpListener.AcceptTcpClientAsync(_cancellationToken);
+                    Log.Information($"Accepted connection from {lExternalTcpClient.Client.RemoteEndPoint}");
 
-                    // Select a backend
                     BackendStatus lBackendStatus;
                     try
                     {
@@ -42,14 +48,13 @@ namespace TcpLoadBalancer.Networking
                     catch (InvalidOperationException)
                     {
                         Log.Warning("No healthy backends available. Closing connection.");
-                        lTcpClient.Close();
+                        lExternalTcpClient.Close();
                         continue;
                     }
 
-                    // Handle connection in a separate task
                     _ = Task.Run(async () =>
                     {
-                        ConnectionHandler lConnectionHandler = new ConnectionHandler(lTcpClient, lBackendStatus, _cancellationToken);
+                        ConnectionHandler lConnectionHandler = new ConnectionHandler(lExternalTcpClient, lBackendStatus, _cancellationToken, _loadBalancerOptions);
                         await lConnectionHandler.HandleAsync();
                     }, _cancellationToken);
                 }

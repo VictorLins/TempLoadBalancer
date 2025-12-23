@@ -30,6 +30,26 @@ namespace TcpLoadBalancer.Health
                     {
                         lBackendStatusCurrent.IsHealthy = lIsHealthyNow;
                         Log.Information($"Backend {lBackendStatusCurrent.Endpoint.Host}:{lBackendStatusCurrent.Endpoint.Port} health changed: " + (lIsHealthyNow ? "Healthy" : "Unhealthy"));
+
+                        if (!lIsHealthyNow)
+                        {
+                            lBackendStatusCurrent.MarkInactive();
+                            Log.Information($"Backend {lBackendStatusCurrent.Endpoint.Host}:{lBackendStatusCurrent.Endpoint.Port} marked inactive, connections reset.");
+                        }
+
+                        if (lIsHealthyNow)
+                        {
+                            if (!_backends.Contains(lBackendStatusCurrent))
+                            {
+                                _backends.Add(lBackendStatusCurrent);
+                                Log.Information($"Backend {lBackendStatusCurrent.Endpoint.Host}:{lBackendStatusCurrent.Endpoint.Port} recovered and added to status list.");
+                            }
+                            else if (!lBackendStatusCurrent.IsEnable)
+                            {
+                                lBackendStatusCurrent.MarkActive();
+                                Log.Information($"Backend {lBackendStatusCurrent.Endpoint.Host}:{lBackendStatusCurrent.Endpoint.Port} recovered and enabled.");
+                            }
+                        }
                     }
                 }
 
@@ -60,6 +80,13 @@ namespace TcpLoadBalancer.Health
             {
                 return false;
             }
+        }
+
+        public void UpdateBackends(List<BackendStatus> prBackends)
+        {
+            _backends.Clear();
+            _backends.AddRange(prBackends);
+            Log.Information("HealthCheckService backends updated.");
         }
     }
 }

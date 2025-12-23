@@ -1,7 +1,9 @@
 ﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+
 using Serilog;
 using System.Net;
-using System.Threading.Tasks;
 using TcpLoadBalancer.Backends;
 using TcpLoadBalancer.Health;
 using TcpLoadBalancer.Models;
@@ -15,18 +17,95 @@ namespace TcpLoadBalancer
     {
         static async Task Main(string[] args)
         {
-            // 1. Load configuration from appsettings.json
+            // 1. Appsettings
             var lConfiguration = new ConfigurationBuilder()
                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
                 .Build();
 
-            // 2. Configure Serilog logging
+            // 2. Serilog
             Log.Logger = new LoggerConfiguration()
             .ReadFrom.Configuration(lConfiguration)
             .Enrich.FromLogContext()
             .CreateLogger();
 
-            // 3. Set up cancellation
+            // 3. DI
+            var lServices = new ServiceCollection();
+
+            lServices.Configure<LoadBalancerOptions>(
+                lConfiguration.GetSection("LoadBalancer"));
+
+            var lBackendStatuses = new List<BackendStatus>();
+            lServices.AddSingleton(lBackendStatuses);
+
+            var lServiceProvider = lServices.BuildServiceProvider();
+            var lIOptionsMonitor = lServiceProvider.GetRequiredService<IOptionsMonitor<LoadBalancerOptions>>();
+
+            IBackendSelector lBackendSelector =
+                BackendSelectorFactory.CreateBackendSelector(
+                    lIOptionsMonitor.CurrentValue.Strategy,
+                    lBackendStatuses
+                );
+
+            // 4. Sync backends helper
+            void SyncBackends(IEnumerable<BackendEndpoint> prEndpoints)
+            {
+                var lDesiredEndpoints = prEndpoints
+                 .Select(e => $"{e.Host}:{e.Port}")
+                 .ToHashSet();
+
+                // Remove backends that no longer exist
+                lBackendStatuses.RemoveAll(b =>
+                    !lDesiredEndpoints.Contains($"{b.Endpoint.Host}:{b.Endpoint.Port}")
+                );
+
+                // Add new backends
+                foreach (var lEndpointCurrent in prEndpoints)
+                {
+                    bool lDoesItExist = lBackendStatuses.Any(b =>
+                        b.Endpoint.Host == lEndpointCurrent.Host &&
+                        b.Endpoint.Port == lEndpointCurrent.Port
+                    );
+
+                    if (!lDoesItExist)
+                    {
+                        lBackendStatuses.Add(new BackendStatus
+                        {
+                            Endpoint = lEndpointCurrent,
+                            IsHealthy = true,
+                            IsEnable = true
+                        });
+
+                        Log.Information(
+                            "New backend added: {Host}:{Port}",
+                            lEndpointCurrent.Host,
+                            lEndpointCurrent.Port
+                        );
+                    }
+                }
+
+                // Removed backends
+                foreach (var b in lBackendStatuses)
+                {
+                    if (!lDesiredEndpoints.Contains($"{b.Endpoint.Host}:{b.Endpoint.Port}"))
+                    {
+                        b.IsEnable = false;
+                        Log.Information("Backend marked disabled: {Host}:{Port}", b.Endpoint.Host, b.Endpoint.Port);
+                    }
+                }
+
+                lBackendSelector.UpdateBackends(lBackendStatuses.Where(b => b.IsEnable).ToList());
+                Log.Information("Backends after sync: {Backends}", string.Join(", ", lBackendStatuses.Select(b => $"{b.Endpoint.Port}"))
+             );
+            }
+
+            // Initial state
+            SyncBackends(lIOptionsMonitor.CurrentValue.Backends);
+
+            // 5. Listen endpoint
+            var lParts = lIOptionsMonitor.CurrentValue.ListenEndpoint.Split(':');
+            var lListenEndpoint = new IPEndPoint(IPAddress.Parse(lParts[0]), int.Parse(lParts[1]));
+
+            // 6. Cancellation
             CancellationTokenSource lCancellationTokenSource = new CancellationTokenSource();
             Console.CancelKeyPress += (s, e) =>
             {
@@ -35,36 +114,41 @@ namespace TcpLoadBalancer
                 lCancellationTokenSource.Cancel();
             };
 
-            // 4. Read load balancer configuration
-            var lLoadBalancerConfig = lConfiguration.GetSection("LoadBalancer");
-            var lListenEndpointsParts = lLoadBalancerConfig["ListenEndpoint"]!.Split(':');
-            var lListenEndoints = new IPEndPoint(IPAddress.Parse(lListenEndpointsParts[0]), int.Parse(lListenEndpointsParts[1]));
+            // 7. Services
+            var lTcpListenerService = new TcpListenerService(
+                () => lBackendSelector,
+                lListenEndpoint,
+                lCancellationTokenSource.Token,
+                lIOptionsMonitor
+            );
 
-            var lBackends = lLoadBalancerConfig.GetSection("Backends").Get<List<BackendEndpoint>>()!
-                .Select(b => new BackendStatus { Endpoint = b }).ToList();
+            var lHealthCheckService = new HealthCheckService(
+                lBackendStatuses,
+                lIOptionsMonitor.CurrentValue.HealthCheckIntervalSeconds,
+                lCancellationTokenSource.Token
+            );
 
-            // 5. Create backend selector (load balancer strategy)
-            String lLoadBalancerStrategy = lLoadBalancerConfig["Strategy"] ?? "RoundRobin";
-            IBackendSelector lBackendSelector = BackendSelectorFactory.CreateBackendSelector(lLoadBalancerStrategy, lBackends);
+            var lStatusFileWriter = new StatusFileWriter(
+                lBackendStatuses,
+                lIOptionsMonitor.CurrentValue.StatusFilePath,
+                5,
+                lCancellationTokenSource.Token
+            );
 
-            // 6. Initialize services
-            var lListenerService = new TcpListenerService(lBackendSelector, lListenEndoints, lCancellationTokenSource.Token);
-            var lHealthService = new HealthCheckService(lBackends, int.Parse(lLoadBalancerConfig["HealthCheckIntervalSeconds"] ?? "10"), lCancellationTokenSource.Token);
-            var lStatusWriter = new StatusFileWriter(lBackends, lLoadBalancerConfig["StatusFilePath"]!, 5, lCancellationTokenSource.Token);
-
-            // 7. Run all services concurrently
-            var lTasks = new Task[]
+            // 8. Config reload handler
+            lIOptionsMonitor.OnChange(newOptions =>
             {
-                lListenerService.StartAsync(),
-                lHealthService.StartAsync(),
-                lStatusWriter.StartAsync()
-            };
+                SyncBackends(newOptions.Backends);
+                Log.Information("LoadBalancer config reloaded");
+            });
 
-            // 8. Start
+            // 9. Run
             Log.Information("TcpLoadBalancer starting...");
-            await Task.WhenAll(lTasks);
-            Log.Information("TcpLoadBalancer stopped.");
-            Log.CloseAndFlush();
+            await Task.WhenAll(
+                lTcpListenerService.StartAsync(),
+                //lHealthCheckService.StartAsync(),
+                lStatusFileWriter.StartAsync()
+            );
         }
     }
 }

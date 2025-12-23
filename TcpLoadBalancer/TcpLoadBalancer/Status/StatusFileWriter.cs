@@ -6,11 +6,11 @@ namespace TcpLoadBalancer.Status
 {
     public class StatusFileWriter
     {
-
         private readonly List<BackendStatus> _backends;
         private readonly string _filePath;
         private readonly int _intervalSeconds;
         private readonly CancellationToken _cancellationToken;
+        private readonly object _fileLock = new object();
 
         public StatusFileWriter(List<BackendStatus> prBackends, string prFilePath, int prIntervalSeconds, CancellationToken prCancellationToken)
         {
@@ -34,6 +34,7 @@ namespace TcpLoadBalancer.Status
                         {
                             endpoint = $"{b.Endpoint.Host}:{b.Endpoint.Port}",
                             healthy = b.IsHealthy,
+                            enabled = b.IsEnable,
                             activeConnections = b.ActiveConnections
                         }).ToList()
                     };
@@ -41,18 +42,19 @@ namespace TcpLoadBalancer.Status
                     var lJson = JsonSerializer.Serialize(lStatus, new JsonSerializerOptions { WriteIndented = true });
                     var lDirectory = Path.GetDirectoryName(_filePath);
                     if (!string.IsNullOrEmpty(lDirectory))
-                    {
                         Directory.CreateDirectory(lDirectory);
+                    lock (_fileLock)
+                    {
+                        File.WriteAllTextAsync(_filePath, lJson, _cancellationToken);
                     }
-                    await File.WriteAllTextAsync(_filePath, lJson, _cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
                     // Exit gracefully
                 }
-                catch (Exception ex)
+                catch (Exception prException)
                 {
-                    Log.Warning(ex, "Failed to write status file");
+                    Log.Warning(prException, "Failed to write status file");
                 }
 
                 try
