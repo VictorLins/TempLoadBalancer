@@ -10,7 +10,8 @@ namespace TcpLoadBalancer.Tests.Integration
     /// These tests verify that the HealthCheckService correctly monitors the health of backend servers,
     /// updating their IsHealthy status based on whether they are reachable or not.
     /// </summary>
-    [Collection("TcpIntegrationTests")]
+    /// 
+    [Collection("IntegrationTests")]
     public class HealthCheckServiceIntegrationTests
     {
         [Fact]

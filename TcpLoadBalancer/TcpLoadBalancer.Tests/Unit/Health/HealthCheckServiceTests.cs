@@ -3,6 +3,7 @@ using TcpLoadBalancer.Models;
 
 namespace TcpLoadBalancer.Tests.Unit.Health
 {
+    [Collection("UnitTests")]
     public class HealthCheckServiceTests
     {
         private class TestHealthCheckService : HealthCheckService

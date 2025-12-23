@@ -45,7 +45,7 @@ namespace TcpLoadBalancer.Status
                         Directory.CreateDirectory(lDirectory);
                     lock (_fileLock)
                     {
-                        File.WriteAllTextAsync(_filePath, lJson, _cancellationToken);
+                        File.WriteAllText(_filePath, lJson);
                     }
                 }
                 catch (OperationCanceledException)

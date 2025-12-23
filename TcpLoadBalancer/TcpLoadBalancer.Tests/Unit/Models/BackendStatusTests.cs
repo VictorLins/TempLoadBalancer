@@ -2,6 +2,7 @@
 
 namespace TcpLoadBalancer.Tests.Unit.Models
 {
+    [Collection("UnitTests")]
     public class BackendStatusTests
     {
         [Fact]

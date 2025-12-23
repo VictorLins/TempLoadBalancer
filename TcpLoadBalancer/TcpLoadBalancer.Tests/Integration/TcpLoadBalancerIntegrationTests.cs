@@ -1,14 +1,16 @@
-﻿using System.Net;
+﻿using Microsoft.Extensions.Options;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using TcpLoadBalancer.Backends;
 using TcpLoadBalancer.Models;
 using TcpLoadBalancer.Networking;
 using TcpLoadBalancer.Tests.TestHelpers;
+using TcpLoadBalancer.Tests.Unit.Models;
 
 namespace TcpLoadBalancer.Tests.Integration
 {
-    [Collection("TcpIntegrationTests")]
+    [Collection("IntegrationTests")]
     public class TcpLoadBalancerIntegrationTests
     {
         /// <summary>
@@ -43,9 +45,10 @@ namespace TcpLoadBalancer.Tests.Integration
             using var lCancellationTokenSource = new CancellationTokenSource();
 
             var lListener = new TcpListenerService(
-                lBackendSelector,
+                () => lBackendSelector,
                 new IPEndPoint(IPAddress.Loopback, 9001),
-                lCancellationTokenSource.Token);
+                lCancellationTokenSource.Token,
+                LoadBalancerOptionsHelper.GetOptionsMonitorFake());
 
             var lListenerTask = lListener.StartAsync();
 
@@ -62,8 +65,6 @@ namespace TcpLoadBalancer.Tests.Integration
 
             await lStream.WriteAsync(lBytes);
             await lStream.FlushAsync();
-
-            // Give backend time to receive
             await Task.Delay(500);
 
             // Assert

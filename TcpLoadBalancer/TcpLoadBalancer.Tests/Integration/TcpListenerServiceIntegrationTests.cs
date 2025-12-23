@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using Microsoft.Extensions.Options;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -7,7 +8,7 @@ using TcpLoadBalancer.Models;
 using TcpLoadBalancer.Networking;
 using TcpLoadBalancer.Tests.TestHelpers;
 
-[Collection("TcpIntegrationTests")]
+[Collection("IntegrationTests")]
 public class TcpListenerServiceIntegrationTests
 {
     /// <summary>
@@ -23,6 +24,7 @@ public class TcpListenerServiceIntegrationTests
     [InlineData("RoundRobin")]
     [InlineData("Random")]
     [InlineData("LeastConnections")]
+    [Trait("Category", "Integration")]
     public async Task LoadBalancer_DistributesMessagesAcrossMultipleBackends(string prStrategy)
     {
         // Arrange: create 3 test backends
@@ -37,8 +39,15 @@ public class TcpListenerServiceIntegrationTests
             new BackendStatus { Endpoint = new BackendEndpoint { Host = "127.0.0.1", Port = 9004 }, IsHealthy = true },
         };
 
+        var loadBalancerOptionsMonitor = new OptionsMonitor<LoadBalancerOptions>(
+                new OptionsFactory<LoadBalancerOptions>(
+                new[] { new ConfigureOptions<LoadBalancerOptions>(_ => { }) },
+                Enumerable.Empty<IPostConfigureOptions<LoadBalancerOptions>>()),
+                Enumerable.Empty<IOptionsChangeTokenSource<LoadBalancerOptions>>(),
+                new OptionsCache<LoadBalancerOptions>());
+
         IBackendSelector lSelector = BackendSelectorFactory.CreateBackendSelector(prStrategy, lBackends);
-        var lListenerService = new TcpListenerService(lSelector, new IPEndPoint(IPAddress.Loopback, 9005), CancellationToken.None);
+        var lListenerService = new TcpListenerService(() => lSelector, new IPEndPoint(IPAddress.Loopback, 9005), CancellationToken.None, loadBalancerOptionsMonitor);
         var lListenerTask = lListenerService.StartAsync();
         await Task.Delay(200);
 
@@ -85,11 +94,11 @@ public class TcpListenerServiceIntegrationTests
 
     private async Task WaitForMessagesAsync(IEnumerable<TestTcpServer> servers, int expectedCount, int timeoutMs = 2000)
     {
-        var sw = Stopwatch.StartNew();
-        while (sw.ElapsedMilliseconds < timeoutMs)
+        var lStopwatch = Stopwatch.StartNew();
+        while (lStopwatch.ElapsedMilliseconds < timeoutMs)
         {
-            int total = servers.Sum(s => s.ReceivedMessages.Count);
-            if (total >= expectedCount)
+            int lTotal = servers.Sum(s => s.ReceivedMessages.Count);
+            if (lTotal >= expectedCount)
                 return;
 
             await Task.Delay(50);

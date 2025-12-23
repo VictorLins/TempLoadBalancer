@@ -34,13 +34,17 @@ namespace TcpLoadBalancer.Networking
                 using TcpClient lInternalClientToTheBackend = CreateBackendTcpClient();
                 await lInternalClientToTheBackend.ConnectAsync(_backend.Endpoint.Host, _backend.Endpoint.Port, _cancellationToken);
 
-                // Set socket options BEFORE getting streams
                 _externalClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
                 lInternalClientToTheBackend.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
 
-                // Add these timeout settings
-                _externalClient.ReceiveTimeout = 0; // Disable receive timeout
-                _externalClient.SendTimeout = 0; // Disable send timeout
+                _externalClient.Client.NoDelay = true;
+                lInternalClientToTheBackend.Client.NoDelay = true;
+
+                SetTcpKeepAlive(_externalClient.Client, 30, 10, 3);
+                SetTcpKeepAlive(lInternalClientToTheBackend.Client, 30, 10, 3);
+
+                _externalClient.ReceiveTimeout = 0;
+                _externalClient.SendTimeout = 0;
                 lInternalClientToTheBackend.ReceiveTimeout = 0;
                 lInternalClientToTheBackend.SendTimeout = 0;
 
@@ -52,69 +56,53 @@ namespace TcpLoadBalancer.Networking
                 using NetworkStream lClientStream = _externalClient.GetStream();
                 using NetworkStream lBackendStream = lInternalClientToTheBackend.GetStream();
 
-                // Add read/write timeouts to streams as well
                 lClientStream.ReadTimeout = Timeout.Infinite;
                 lClientStream.WriteTimeout = Timeout.Infinite;
                 lBackendStream.ReadTimeout = Timeout.Infinite;
                 lBackendStream.WriteTimeout = Timeout.Infinite;
 
-                int lIdleTimeoutSeconds = _loadBalancerOptions.CurrentValue.DefaultIdleTimeoutSeconds;
-                Log.Information($"Using idle timeout of {lIdleTimeoutSeconds} seconds");
-
                 var lBuffer = new byte[8192];
 
-                async Task CopyStreamWithIdleTimeout(NetworkStream prFrom, NetworkStream prTo, string direction, CancellationToken prCancellationToken)
+                // Shared cancellation to stop both directions when one fails
+                using var lConnectionCts = CancellationTokenSource.CreateLinkedTokenSource(_cancellationToken,
+                    _backend.ConnectionCancellationTokenSource?.Token ?? _cancellationToken);
+
+                async Task CopyStream(NetworkStream prFrom, NetworkStream prTo, string direction)
                 {
                     int iterations = 0;
-                    while (!prCancellationToken.IsCancellationRequested)
+                    try
                     {
-                        int lRead;
-                        try
+                        while (!lConnectionCts.Token.IsCancellationRequested)
                         {
-                            Log.Debug($"[{direction}] Waiting for data... (iteration {++iterations})");
+                            int lRead = await prFrom.ReadAsync(lBuffer, 0, lBuffer.Length, lConnectionCts.Token);
 
-                            var lReadTask = prFrom.ReadAsync(lBuffer, 0, lBuffer.Length, prCancellationToken);
-                            var lTimeoutTask = Task.Delay(TimeSpan.FromSeconds(lIdleTimeoutSeconds), prCancellationToken);
-
-                            var lCompletedTask = await Task.WhenAny(lReadTask, lTimeoutTask);
-
-                            if (lCompletedTask == lTimeoutTask)
+                            if (lRead == 0)
                             {
-                                Log.Information($"[{direction}] Idle timeout reached after {lIdleTimeoutSeconds} seconds for backend {_backend.Endpoint.Host}:{_backend.Endpoint.Port}");
+                                Log.Information($"[{direction}] Connection closed gracefully (0 bytes read)");
                                 break;
                             }
 
-                            lRead = await lReadTask;
-                            Log.Debug($"[{direction}] Read {lRead} bytes");
+                            await prTo.WriteAsync(lBuffer, 0, lRead, lConnectionCts.Token);
                         }
-                        catch (OperationCanceledException)
-                        {
-                            Log.Information($"[{direction}] Operation canceled for backend {_backend.Endpoint.Host}:{_backend.Endpoint.Port}");
-                            break;
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Warning(ex, $"[{direction}] Read error for backend {_backend.Endpoint.Host}:{_backend.Endpoint.Port}");
-                            break;
-                        }
-
-                        if (lRead == 0)
-                        {
-                            Log.Information($"[{direction}] Connection closed (0 bytes read) for backend {_backend.Endpoint.Host}:{_backend.Endpoint.Port}");
-                            break;
-                        }
-
-                        await prTo.WriteAsync(lBuffer, 0, lRead, prCancellationToken);
                     }
-
-                    Log.Information($"[{direction}] Stream copy completed");
+                    catch (OperationCanceledException)
+                    {
+                        Log.Information($"[{direction}] Operation canceled");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, $"[{direction}] Stream error");
+                    }
+                    finally
+                    {
+                        // Cancel the other direction when one direction completes
+                        lConnectionCts.Cancel();
+                        Log.Information($"[{direction}] Stream copy completed");
+                    }
                 }
 
-                var lLinkedCancellationToken = CancellationTokenSource.CreateLinkedTokenSource(
-                    _cancellationToken, _backend.ConnectionCancellationTokenSource?.Token ?? _cancellationToken);
-
-                Task lForwardClientToBackend = CopyStreamWithIdleTimeout(lClientStream, lBackendStream, "Client->Backend", lLinkedCancellationToken.Token);
-                Task lForwardBackendToClient = CopyStreamWithIdleTimeout(lBackendStream, lClientStream, "Backend->Client", lLinkedCancellationToken.Token);
+                Task lForwardClientToBackend = CopyStream(lClientStream, lBackendStream, "Client->Backend");
+                Task lForwardBackendToClient = CopyStream(lBackendStream, lClientStream, "Backend->Client");
 
                 Log.Information($"Starting bidirectional forwarding for backend {_backend.Endpoint.Host}:{_backend.Endpoint.Port}");
                 await Task.WhenAll(lForwardClientToBackend, lForwardBackendToClient);
@@ -124,7 +112,7 @@ namespace TcpLoadBalancer.Networking
             {
                 Log.Information($"Socket error {se.SocketErrorCode}: {se.Message} for backend {_backend.Endpoint.Host}:{_backend.Endpoint.Port}");
             }
-            catch (OperationCanceledException prOperationCanceledException)
+            catch (OperationCanceledException)
             {
                 Log.Information("Connection handling canceled.");
             }
@@ -138,6 +126,24 @@ namespace TcpLoadBalancer.Networking
                 if (lIncremented)
                     _backend.DecrementActiveConnections();
                 Log.Information($"Connection closed for backend {_backend.Endpoint.Host}:{_backend.Endpoint.Port}");
+            }
+        }
+
+        private void SetTcpKeepAlive(Socket prSocket, int prKeepAliveTime, int prKeepAliveInterval, int prKeepAliveRetryCount)
+        {
+            try
+            {
+                if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+                {
+                    prSocket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, prKeepAliveTime);
+                    prSocket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, prKeepAliveInterval);
+                    prSocket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, prKeepAliveRetryCount);
+                    Log.Debug($"TCP Keep-Alive configured: Time={prKeepAliveTime}s, Interval={prKeepAliveInterval}s, Retries={prKeepAliveRetryCount}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Failed to set TCP Keep-Alive parameters");
             }
         }
     }

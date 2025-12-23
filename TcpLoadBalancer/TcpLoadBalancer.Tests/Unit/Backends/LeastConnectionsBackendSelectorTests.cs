@@ -3,6 +3,7 @@ using TcpLoadBalancer.Models;
 
 namespace TcpLoadBalancer.Tests.Unit.Backends
 {
+    [Collection("UnitTests")]
     public class LeastConnectionsBackendSelectorTests
     {
         [Fact]

@@ -1,10 +1,12 @@
-﻿using System.Net;
+﻿using Microsoft.Extensions.Options;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using TcpLoadBalancer.Backends;
 using TcpLoadBalancer.Models;
 using TcpLoadBalancer.Networking;
 using TcpLoadBalancer.Tests.TestHelpers;
+using TcpLoadBalancer.Tests.Unit.Models;
 
 namespace TcpLoadBalancer.Tests.Integration
 {
@@ -14,7 +16,7 @@ namespace TcpLoadBalancer.Tests.Integration
     /// These tests ensure that the listener stops accepting new client connections
     /// when the cancellation token is triggered, while allowing in-flight connections to complete.
     /// </summary>
-    [Collection("TcpIntegrationTests")]
+    [Collection("IntegrationTests")]
     public class TcpListenerServiceGracefulShutdownTests
     {
         [Fact]
@@ -22,57 +24,67 @@ namespace TcpLoadBalancer.Tests.Integration
         public async Task TcpListenerService_StopsAcceptingConnections_OnCancellation()
         {
             // Arrange
-            using var lBackendServer = new TestTcpServer(9006); // Test backend
+            int lBackendPort = 9006;
+            int lListenerPort = 9007;
+
+            using var lBackendServer = new TestTcpServer(lBackendPort);
             var lBackendStatus = new BackendStatus
             {
-                Endpoint = new BackendEndpoint { Host = "127.0.0.1", Port = 9006 },
+                Endpoint = new BackendEndpoint { Host = "127.0.0.1", Port = lBackendPort },
                 IsHealthy = true
             };
 
             var lBackendSelector = new RandomBackendSelector(new List<BackendStatus> { lBackendStatus });
-
             using var lCancellationTokenSource = new CancellationTokenSource();
 
             var lListener = new TcpListenerService(
-                lBackendSelector,
-                new IPEndPoint(IPAddress.Loopback, 9007), // listener port
-                lCancellationTokenSource.Token);
+                () => lBackendSelector,
+                new IPEndPoint(IPAddress.Loopback, lListenerPort),
+                lCancellationTokenSource.Token,
+                LoadBalancerOptionsHelper.GetOptionsMonitorFake());
 
-            var lListenerTask = lListener.StartAsync();
+            var lListenerTask =  lListener.StartAsync();
             await Task.Delay(500);
 
-            // Act: Connect a client before shutdown
-            using var lClient1 = new TcpClient();
-            await lClient1.ConnectAsync("127.0.0.1", 9007);
+            // Act
+            using (var lClient1 = new TcpClient())
+            {
+                await lClient1.ConnectAsync("127.0.0.1", lListenerPort);
+                using var stream = lClient1.GetStream();
+                var data = Encoding.UTF8.GetBytes("before-shutdown\n");
+                await stream.WriteAsync(data, 0, data.Length);
+                await stream.FlushAsync();
 
-            var lClient1Stream = lClient1.GetStream();
-            var lMessage1 = "before-shutdown";
-            await lClient1Stream.WriteAsync(Encoding.UTF8.GetBytes(lMessage1 + "\n"));
-            await lClient1Stream.FlushAsync();
-            await Task.Delay(500);
+                await Task.Delay(500);
+            }
 
             lCancellationTokenSource.Cancel();
+            await Task.Delay(500);
 
-            // Try connecting a second client after shutdown
-            var lClient2 = new TcpClient();
-            var lConnectExceptionThrown = false;
+            bool lConnectExceptionThrown = false;
             try
             {
-                await lClient2.ConnectAsync("127.0.0.1", 9007);
-            }
-            catch (Exception)
-            {
-                lConnectExceptionThrown = true;
-            }
+                using var lClient2 = new TcpClient();
+                using var lCancellationTokenSource2 = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await lClient2.ConnectAsync("127.0.0.1", lListenerPort, lCancellationTokenSource2.Token);
 
-            // Wait for listener task to finish
-            await lListenerTask;
+                lClient2.GetStream().Write(new byte[] { 0 }, 0, 1);
+                lConnectExceptionThrown = false;
+            }
+            catch { lConnectExceptionThrown = true; }
+
+            await Task.WhenAny(lListenerTask, Task.Delay(1000));
 
             // Assert
-            // First client should have reached backend
-            Assert.Contains("before-shutdown", lBackendServer.ReceivedMessages);
-            // Second client should NOT connect
-            Assert.True(lConnectExceptionThrown, "Listener should not accept new connections after cancellation");
+            var start = DateTime.Now;
+            while (!lBackendServer.ReceivedMessages.Any() && (DateTime.Now - start).TotalSeconds < 2)
+            {
+                await Task.Delay(100);
+            }
+
+            Assert.NotEmpty(lBackendServer.ReceivedMessages);
+            Assert.Contains(lBackendServer.ReceivedMessages, m => m.Contains("before-shutdown"));
+            Assert.True(lConnectExceptionThrown, "O listener aceitou conexão após cancelamento");
         }
     }
 }

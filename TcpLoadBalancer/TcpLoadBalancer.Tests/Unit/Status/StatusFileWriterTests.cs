@@ -4,6 +4,7 @@ using TcpLoadBalancer.Status;
 
 namespace TcpLoadBalancer.Tests.Unit.Status
 {
+    [Collection("UnitTests")]
     public class StatusFileWriterTests
     {
         [Fact]

@@ -13,9 +13,14 @@ using TcpLoadBalancer.Status;
 
 namespace TcpLoadBalancer
 {
-    internal class Program
+    public class Program
     {
         static async Task Main(string[] args)
+        {
+            await RunProcesses();
+        }
+
+        public static async Task RunProcesses()
         {
             // 1. Appsettings
             var lConfiguration = new ConfigurationBuilder()
@@ -146,7 +151,7 @@ namespace TcpLoadBalancer
             Log.Information("TcpLoadBalancer starting...");
             await Task.WhenAll(
                 lTcpListenerService.StartAsync(),
-                //lHealthCheckService.StartAsync(),
+                lHealthCheckService.StartAsync(),
                 lStatusFileWriter.StartAsync()
             );
         }
